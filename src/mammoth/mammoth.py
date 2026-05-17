@@ -251,6 +251,11 @@ class Mammoth(nn.Module):
         assert divisible_by(input_dim, num_heads), (
             "dimension must be divisible by number of heads"
         )
+
+        assert dim != slot_dim, (
+            "Output dimension must be different than slot dimension"
+        )
+        
         self.num_slots = num_slots
         self.keep_slots = keep_slots
         self.slot_dropout = slot_dropout
@@ -394,14 +399,15 @@ class Mammoth(nn.Module):
         Returns:
             combine_weights: (b, n, h, e*s) for combining slot outputs. dispatch_weights: (b, n, e, h, s).
         """
+        logits_f = logits.float()
         if self.slot_dropout > 0 and self.training:
             dropout_mask = (
-                torch.rand(logits.shape, device=logits.device) > self.slot_dropout
+                torch.rand(logits_f.shape, device=logits_f.device) > self.slot_dropout
             )
             dispatch_weights = F.softmax(
-                logits.masked_fill(~dropout_mask, float("-inf")), dim=1
-            )
-            logits_reshaped = rearrange(logits, "b n e h s -> b n h (e s)")
+                logits_f.masked_fill(~dropout_mask, float("-inf")), dim=1
+            ).to(logits.dtype)
+            logits_reshaped = rearrange(logits_f, "b n e h s -> b n h (e s)")
             mask_reshaped = rearrange(dropout_mask, "b n e h s -> b n h (e s)")
             combine_weights = F.softmax(
                 logits_reshaped.masked_fill(~mask_reshaped, float("-inf")), dim=-1
@@ -410,6 +416,6 @@ class Mammoth(nn.Module):
             dispatch_weights = F.softmax(logits, dim=1)
             combine_weights = F.softmax(
                 rearrange(logits, "b n e h s -> b n h (e s)"), dim=-1
-            )
+            ).to(logits.dtype)
 
         return combine_weights, dispatch_weights
